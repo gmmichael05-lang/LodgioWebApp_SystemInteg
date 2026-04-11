@@ -1,0 +1,33 @@
+# --- Default behavior ---
+# Auto-detect text files and normalize line endings to LF (Unix style)
+* text=auto
+
+# --- Frontend (Vite / React / Node) ---
+# Mark lockfiles as generated so they don't ruin your GitHub language statistics
+package-lock.json linguist-generated=true
+yarn.lock linguist-generated=true
+pnpm-lock.yaml linguist-generated=true
+
+# Ignore build outputs in language stats
+dist/* linguist-generated=true
+build/* linguist-generated=true
+
+# Enforce LF (Unix) line endings for source code to prevent cross-OS conflicts
+*.js text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+
+# --- Backend (Spring Boot / Java) ---
+# Keep Windows scripts with Windows line endings (CRLF)
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Keep Bash/Linux scripts with Unix line endings (LF)
+*.sh text eol=lf
+mvnw text eol=lf
+
+# Treat archives and compiled Java files as binary (do not modify line endings)
+*.jar binary
+*.class binary
