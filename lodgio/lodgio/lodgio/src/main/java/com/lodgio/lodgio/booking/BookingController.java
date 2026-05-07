@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -46,5 +47,19 @@ public class BookingController {
         return bookingService.updateBookingStatus(id, status)
                 .map(b -> ResponseEntity.ok(BookingDTO.from(b)))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/listing/{listingId}/dates")
+    public ResponseEntity<List<Map<String, String>>> getBookedDatesForListing(
+            @PathVariable("listingId") UUID listingId) {
+        var bookings = bookingService.getActiveBookingsForListing(listingId);
+        List<Map<String, String>> dates = bookings.stream().map(b -> {
+            Map<String, String> m = new HashMap<>();
+            m.put("checkIn", b.getCheckInDate().toString());
+            m.put("checkOut", b.getCheckOutDate().toString());
+            m.put("status", b.getStatus());
+            return m;
+        }).toList();
+        return ResponseEntity.ok(dates);
     }
 }

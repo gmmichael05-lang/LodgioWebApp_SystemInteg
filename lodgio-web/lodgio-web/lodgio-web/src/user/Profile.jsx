@@ -1,4 +1,4 @@
-﻿const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -75,6 +75,10 @@ export default function Profile() {
       } else if (data.mobileNumber) {
         setContactNumbers([data.mobileNumber]);
       }
+      // Load saved cards from backend
+      if (data.savedCards) {
+        try { setSavedCards(JSON.parse(data.savedCards)); } catch { setSavedCards([]); }
+      }
       if (isHost) {
         const listRes = await fetch(`${API}/listings/host/${user.email}`);
         if (listRes.ok) setListingHistory(await listRes.json());
@@ -139,13 +143,28 @@ export default function Profile() {
     } finally { setSavingProfile(false); }
   };
 
-  // ─── Contact Numbers ───
+  // ─── Contact Numbers (persisted to backend) ───
+  const persistContacts = async (updatedContacts) => {
+    if (!backendUser?.id) return;
+    try {
+      await fetch(`${API}/users/${backendUser.id}/contacts`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedContacts.join(","))
+      });
+    } catch (e) { console.error("Failed to save contacts", e); }
+  };
   const handleAddContact = () => {
     if (!newContact.trim()) return;
-    setContactNumbers(prev => [...prev, newContact.trim()]);
+    const updated = [...contactNumbers, newContact.trim()];
+    setContactNumbers(updated);
+    persistContacts(updated);
     setNewContact(""); setShowAddContact(false);
   };
-  const handleRemoveContact = (idx) => setContactNumbers(prev => prev.filter((_, i) => i !== idx));
+  const handleRemoveContact = (idx) => {
+    const updated = contactNumbers.filter((_, i) => i !== idx);
+    setContactNumbers(updated);
+    persistContacts(updated);
+  };
 
   // ─── Password Change ───
   const handlePasswordChange = async (e) => {
@@ -175,6 +194,15 @@ export default function Profile() {
     if (digits.length >= 3) return digits.slice(0, 2) + "/" + digits.slice(2);
     return digits;
   };
+  const persistCards = async (updatedCards) => {
+    if (!backendUser?.id) return;
+    try {
+      await fetch(`${API}/users/${backendUser.id}/cards`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedCards)
+      });
+    } catch (e) { console.error("Failed to save cards", e); }
+  };
   const handleSaveCard = (e) => {
     e.preventDefault();
     setCardError("");
@@ -184,15 +212,20 @@ export default function Profile() {
     if (!cardExpiry.includes("/")) return setCardError("Invalid expiry format (MM/YY).");
     if (cardCVC.length < 3) return setCardError("Invalid CVC.");
     setCardSaving(true);
-    setTimeout(() => {
-      const brand = raw.startsWith("4") ? "VISA" : raw.startsWith("5") ? "Mastercard" : raw.startsWith("3") ? "Amex" : "Card";
-      const last4 = raw.slice(-4);
-      setSavedCards(prev => [...prev, { id: Date.now(), brand, last4, holder: cardHolder, expiry: cardExpiry }]);
-      setCardHolder(""); setCardNumber(""); setCardExpiry(""); setCardCVC("");
-      setCardSaving(false); setShowAddCardModal(false);
-    }, 600);
+    const brand = raw.startsWith("4") ? "VISA" : raw.startsWith("5") ? "Mastercard" : raw.startsWith("3528") || raw.startsWith("3589") ? "JCB" : raw.startsWith("3") ? "AMEX" : raw.startsWith("36") || raw.startsWith("38") ? "Diners Club" : "Card";
+    const last4 = raw.slice(-4);
+    const newCard = { id: Date.now(), brand, last4, holder: cardHolder, expiry: cardExpiry };
+    const updated = [...savedCards, newCard];
+    setSavedCards(updated);
+    persistCards(updated);
+    setCardHolder(""); setCardNumber(""); setCardExpiry(""); setCardCVC("");
+    setCardSaving(false); setShowAddCardModal(false);
   };
-  const removeCard = (id) => setSavedCards(prev => prev.filter(c => c.id !== id));
+  const removeCard = (id) => {
+    const updated = savedCards.filter(c => c.id !== id);
+    setSavedCards(updated);
+    persistCards(updated);
+  };
 
   const getStatusStyle = (status) => {
     if (status === "ACCEPTED" || status === "PAID") return { bg: "#dcfce7", color: "#166534" };

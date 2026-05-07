@@ -2,14 +2,37 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, Lock, CreditCard, Shield, Check } from "lucide-react";
+import { ArrowLeft, Lock, CreditCard, Shield, Check, AlertCircle } from "lucide-react";
 
 const PAYMENT_METHODS = [
-  { id: "JCB", label: "JCB", color: "#1e3a8a" },
-  { id: "Mastercard", label: "Mastercard", color: "#dc2626" },
-  { id: "Amex", label: "AMEX", color: "#1d4ed8" },
-  { id: "Diners Club", label: "Diners Club", color: "#1e40af" },
+  { id: "JCB", label: "JCB", color: "#1e3a8a", bg: "#1e3a8a" },
+  { id: "Mastercard", label: "Mastercard", color: "#dc2626", bg: "#fff" },
+  { id: "AMEX", label: "AMEX", color: "#1d4ed8", bg: "#1d4ed8" },
+  { id: "Diners Club", label: "Diners Club", color: "#1e40af", bg: "#fff" },
 ];
+
+// Card brand logo components
+const CardBrandLogo = ({ brand, size = "normal" }) => {
+  const s = size === "small" ? { w: 38, h: 24, fs: 8 } : { w: 52, h: 32, fs: 10 };
+  const styles = {
+    VISA: { background: "linear-gradient(135deg, #1a1f71, #2d3ab5)", color: "#fff", fontStyle: "italic", fontWeight: 900, letterSpacing: "1px" },
+    Mastercard: { background: "linear-gradient(135deg, #eb001b, #f79e1b)", color: "#fff", fontWeight: 800, letterSpacing: "0.3px" },
+    JCB: { background: "linear-gradient(135deg, #1e3a8a, #2563eb)", color: "#fff", fontWeight: 800, fontStyle: "italic" },
+    AMEX: { background: "linear-gradient(135deg, #006fcf, #00aaff)", color: "#fff", fontWeight: 900, letterSpacing: "0.5px" },
+    "Diners Club": { background: "linear-gradient(135deg, #0066b2, #0088e0)", color: "#fff", fontWeight: 700 },
+    Card: { background: "#64748b", color: "#fff", fontWeight: 700 },
+  };
+  const st = styles[brand] || styles.Card;
+  return (
+    <div style={{
+      width: `${s.w}px`, height: `${s.h}px`, borderRadius: "6px",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: `${s.fs}px`, ...st, flexShrink: 0
+    }}>
+      {brand === "Mastercard" ? "●●" : brand?.toUpperCase() || "CARD"}
+    </div>
+  );
+};
 
 export default function Checkout() {
   const { id } = useParams();
@@ -33,7 +56,9 @@ export default function Checkout() {
   const [expiry, setExpiry] = useState("");
   const [cvc, setCvc] = useState("");
   const [saveCard, setSaveCard] = useState(false);
-  const [discountCode, setDiscountCode] = useState("");
+  const [savedCards, setSavedCards] = useState([]);
+  const [selectedSavedCard, setSelectedSavedCard] = useState(null);
+  const [validationError, setValidationError] = useState("");
 
   useEffect(() => {
     const userStr = window.localStorage.getItem("lodgio_user");
@@ -46,16 +71,69 @@ export default function Checkout() {
       setListing(listingData);
       setUser(userData);
       setCardName(userData.fullname || "");
+      // Load saved cards from backend
+      if (userData.savedCards) {
+        try {
+          const cards = JSON.parse(userData.savedCards);
+          setSavedCards(cards);
+        } catch { setSavedCards([]); }
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [id, navigate]);
 
+  const formatCardNum = (val) => {
+    const digits = val.replace(/\D/g, "").slice(0, 16);
+    return digits.match(/.{1,4}/g)?.join(" ") || digits;
+  };
+  const formatExp = (val) => {
+    const digits = val.replace(/\D/g, "").slice(0, 4);
+    if (digits.length >= 3) return digits.slice(0, 2) + "/" + digits.slice(2);
+    return digits;
+  };
+
   const nights = (checkIn && checkOut) ? Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / 86400000)) : 1;
 
+  const handleSelectSavedCard = (card) => {
+    if (selectedSavedCard?.id === card.id) {
+      setSelectedSavedCard(null); // deselect
+    } else {
+      setSelectedSavedCard(card);
+      setCardName(card.holder);
+      setCardNumber(""); setExpiry(""); setCvc(""); // Clear manual entry
+    }
+  };
+
   const handleConfirmPayment = async () => {
+    setValidationError("");
+
+    // Validate card details if no saved card selected
+    if (!selectedSavedCard) {
+      if (!cardName.trim()) { setValidationError("Cardholder name is required."); return; }
+      const rawNum = cardNumber.replace(/\s/g, "");
+      if (rawNum.length < 13) { setValidationError("Please enter a valid card number."); return; }
+      if (!expiry.includes("/") || expiry.length < 5) { setValidationError("Please enter a valid expiry date (MM/YY)."); return; }
+      if (cvc.length < 3) { setValidationError("Please enter a valid CVC code."); return; }
+    }
+
     setIsProcessing(true);
     const basePrice = listing.pricePerNight * nights;
     const totalPrice = basePrice + 1320 + 1760;
+
+    // If saving card, persist to backend
+    if (saveCard && !selectedSavedCard && user) {
+      const rawNum = cardNumber.replace(/\s/g, "");
+      const brand = rawNum.startsWith("4") ? "VISA" : rawNum.startsWith("5") ? "Mastercard" : rawNum.startsWith("3528") || rawNum.startsWith("3589") ? "JCB" : rawNum.startsWith("3") ? "AMEX" : rawNum.startsWith("36") || rawNum.startsWith("38") ? "Diners Club" : "Card";
+      const newCard = { id: Date.now(), brand, last4: rawNum.slice(-4), holder: cardName, expiry };
+      const updatedCards = [...savedCards, newCard];
+      try {
+        await fetch(`${API}/users/${user.id}/cards`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedCards)
+        });
+      } catch (e) { console.error(e); }
+    }
+
     const bookingPayload = {
       guest: { id: user.id },
       listing: { id: listing.id },
@@ -63,7 +141,7 @@ export default function Checkout() {
       checkOutDate: checkOut,
       totalPrice,
       messageToHost,
-      paymentMethod,
+      paymentMethod: selectedSavedCard ? selectedSavedCard.brand : paymentMethod,
       status: "PENDING"
     };
     try {
@@ -76,10 +154,15 @@ export default function Checkout() {
         setIsSuccess(true);
         setTimeout(() => navigate("/profile"), 2500);
       } else {
-        alert("Payment failed. Please try again.");
+        const errText = await res.text().catch(() => "");
+        if (errText.includes("conflict") || res.status === 400) {
+          setValidationError("These dates are already booked. Please choose different dates.");
+        } else {
+          setValidationError("Payment failed. Please try again.");
+        }
       }
     } catch (e) {
-      alert("Network error.");
+      setValidationError("Network error. Please check your connection.");
     } finally {
       setIsProcessing(false);
     }
@@ -142,62 +225,88 @@ export default function Checkout() {
           <div style={{ color: "rgba(255,255,255,0.5)", fontSize: "14px", marginTop: "4px" }}>{listing.title} · {nights} night{nights !== 1 ? "s" : ""}</div>
         </div>
 
-        {/* Saved Card Section - empty state */}
+        {validationError && (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "#fef2f2", color: "#991b1b", padding: "14px 16px", borderRadius: "12px", marginBottom: "16px", fontSize: "14px", fontWeight: 500 }}>
+            <AlertCircle size={18} /> {validationError}
+          </div>
+        )}
+
+        {/* Saved Cards Section */}
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", padding: "24px", marginBottom: "16px", animation: "slideUp 0.4s ease 0.15s both" }}>
           <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
             <CreditCard size={18} color="#0ea5e9" /> Saved Cards
           </h3>
-          <p style={{ fontSize: "13px", color: "#94a3b8", fontStyle: "italic" }}>No saved cards. You can save a card after entering details below.</p>
+          {savedCards.length === 0 ? (
+            <p style={{ fontSize: "13px", color: "#94a3b8", fontStyle: "italic" }}>No saved cards. You can save a card after entering details below.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {savedCards.map(card => {
+                const isActive = selectedSavedCard?.id === card.id;
+                return (
+                  <div key={card.id} onClick={() => handleSelectSavedCard(card)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "14px", padding: "14px 18px",
+                      background: isActive ? "#f0f9ff" : "#f8fafc", borderRadius: "12px",
+                      border: isActive ? "2px solid #0ea5e9" : "1px solid #e2e8f0",
+                      cursor: "pointer", transition: "all 0.2s", position: "relative"
+                    }}>
+                    {isActive && (
+                      <div style={{ position: "absolute", top: "8px", right: "8px", background: "#0ea5e9", borderRadius: "50%", width: "18px", height: "18px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Check size={10} color="#fff" strokeWidth={3} />
+                      </div>
+                    )}
+                    <CardBrandLogo brand={card.brand} size="small" />
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>•••• •••• •••• {card.last4}</div>
+                      <div style={{ fontSize: "12px", color: "#64748b" }}>{card.holder} · Expires {card.expiry}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Payment Method */}
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", padding: "24px", marginBottom: "16px", animation: "slideUp 0.4s ease 0.2s both" }}>
-          <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>Payment Method</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            {PAYMENT_METHODS.map(pm => {
-              const active = paymentMethod === pm.id;
-              return (
-                <button key={pm.id} type="button" onClick={() => setPaymentMethod(pm.id)}
-                  style={{ padding: "14px", borderRadius: "12px", border: active ? "2px solid #0ea5e9" : "1.5px solid #e2e8f0", background: active ? "#f0f9ff" : "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s", position: "relative" }}>
-                  {active && <div style={{ position: "absolute", top: "6px", right: "6px", background: "#0ea5e9", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={10} color="#fff" strokeWidth={3} /></div>}
-                  <span style={{ fontWeight: 800, color: pm.color, fontStyle: pm.id === "JCB" ? "italic" : "normal", fontSize: "15px" }}>{pm.label}</span>
-                </button>
-              );
-            })}
+        {!selectedSavedCard && (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", padding: "24px", marginBottom: "16px", animation: "slideUp 0.4s ease 0.2s both" }}>
+            <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a", marginBottom: "14px" }}>Payment Method</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              {PAYMENT_METHODS.map(pm => {
+                const active = paymentMethod === pm.id;
+                return (
+                  <button key={pm.id} type="button" onClick={() => setPaymentMethod(pm.id)}
+                    style={{ padding: "14px", borderRadius: "12px", border: active ? "2px solid #0ea5e9" : "1.5px solid #e2e8f0", background: active ? "#f0f9ff" : "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", transition: "all 0.2s", position: "relative" }}>
+                    {active && <div style={{ position: "absolute", top: "6px", right: "6px", background: "#0ea5e9", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={10} color="#fff" strokeWidth={3} /></div>}
+                    <CardBrandLogo brand={pm.id} size="small" />
+                    <span style={{ fontWeight: 700, color: pm.color, fontSize: "14px" }}>{pm.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Card Details */}
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", padding: "24px", marginBottom: "16px", animation: "slideUp 0.4s ease 0.25s both" }}>
-          <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-            <Lock size={18} color="#0ea5e9" /> Card Details
-          </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <input type="text" value={cardName} onChange={e => setCardName(e.target.value)} placeholder="Name on card" style={inputStyle} onFocus={onFocus} onBlur={onBlur} />
-            <input type="text" value={cardNumber} onChange={e => setCardNumber(e.target.value)} placeholder="1234 5678 9012 3456" style={inputStyle} onFocus={onFocus} onBlur={onBlur} maxLength={19} />
-            <div style={{ display: "flex", gap: "12px" }}>
-              <input type="text" value={expiry} onChange={e => setExpiry(e.target.value)} placeholder="MM/YY" style={{ ...inputStyle, flex: 1 }} onFocus={onFocus} onBlur={onBlur} maxLength={5} />
-              <input type="text" value={cvc} onChange={e => setCvc(e.target.value)} placeholder="CVC" style={{ ...inputStyle, flex: 1 }} onFocus={onFocus} onBlur={onBlur} maxLength={4} />
+        {!selectedSavedCard && (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", padding: "24px", marginBottom: "16px", animation: "slideUp 0.4s ease 0.25s both" }}>
+            <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <Lock size={18} color="#0ea5e9" /> Card Details <span style={{ color: "#ef4444", fontSize: "14px" }}>*</span>
+            </h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <input type="text" value={cardName} onChange={e => setCardName(e.target.value)} placeholder="Name on card" style={inputStyle} onFocus={onFocus} onBlur={onBlur} />
+              <input type="text" value={cardNumber} onChange={e => setCardNumber(formatCardNum(e.target.value))} placeholder="1234 5678 9012 3456" style={inputStyle} onFocus={onFocus} onBlur={onBlur} maxLength={19} />
+              <div style={{ display: "flex", gap: "12px" }}>
+                <input type="text" value={expiry} onChange={e => setExpiry(formatExp(e.target.value))} placeholder="MM/YY" style={{ ...inputStyle, flex: 1 }} onFocus={onFocus} onBlur={onBlur} maxLength={5} />
+                <input type="text" value={cvc} onChange={e => setCvc(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="CVC" style={{ ...inputStyle, flex: 1 }} onFocus={onFocus} onBlur={onBlur} maxLength={4} />
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontSize: "14px", color: "#475569", padding: "4px 0" }}>
+                <input type="checkbox" checked={saveCard} onChange={e => setSaveCard(e.target.checked)} style={{ accentColor: "#0ea5e9", width: "16px", height: "16px" }} />
+                Save this card for future bookings
+              </label>
             </div>
-            <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontSize: "14px", color: "#475569", padding: "4px 0" }}>
-              <input type="checkbox" checked={saveCard} onChange={e => setSaveCard(e.target.checked)} style={{ accentColor: "#0ea5e9", width: "16px", height: "16px" }} />
-              Save this card for future bookings
-            </label>
           </div>
-        </div>
-
-        {/* Discount Code */}
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "20px", padding: "24px", marginBottom: "24px", animation: "slideUp 0.4s ease 0.3s both" }}>
-          <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>Discount Code</h3>
-          <div style={{ display: "flex", gap: "10px" }}>
-            <input type="text" value={discountCode} onChange={e => setDiscountCode(e.target.value)} placeholder="Enter promo code" style={{ ...inputStyle, flex: 1 }} onFocus={onFocus} onBlur={onBlur} />
-            <button style={{ padding: "12px 20px", background: "#0f172a", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer", fontSize: "14px", transition: "background 0.2s", whiteSpace: "nowrap" }}
-              onMouseEnter={e => e.target.style.background = "#0ea5e9"}
-              onMouseLeave={e => e.target.style.background = "#0f172a"}>
-              Apply
-            </button>
-          </div>
-        </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px", animation: "slideUp 0.4s ease 0.35s both" }}>

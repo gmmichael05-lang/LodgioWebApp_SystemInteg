@@ -1,8 +1,8 @@
-﻿const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MapPin, Wifi, Wind, Droplet, Dumbbell, Car, Check, Users, Bed, Bath, Star, Shield } from "lucide-react";
+import { MapPin, Wifi, Wind, Droplet, Dumbbell, Car, Check, Users, Bed, Bath, Star, Shield, AlertCircle } from "lucide-react";
 
 export default function ListingDetails() {
   const { id } = useParams();
@@ -12,17 +12,45 @@ export default function ListingDetails() {
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [guests, setGuests] = useState(2);
+  const [bookedDates, setBookedDates] = useState([]);
+  const [dateError, setDateError] = useState("");
 
   useEffect(() => {
-    fetch(`${API}/listings/${id}`)
-      .then(res => res.json())
-      .then(data => { setListing(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    Promise.all([
+      fetch(`${API}/listings/${id}`).then(res => res.json()),
+      fetch(`${API}/bookings/listing/${id}/dates`).then(res => res.ok ? res.json() : [])
+    ]).then(([data, dates]) => {
+      setListing(data);
+      setBookedDates(dates || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [id]);
 
+  // Check if selected dates overlap with booked dates
+  const checkDateConflict = (ci, co) => {
+    if (!ci || !co) return false;
+    const checkInDate = new Date(ci);
+    const checkOutDate = new Date(co);
+    for (const bd of bookedDates) {
+      const bookedIn = new Date(bd.checkIn);
+      const bookedOut = new Date(bd.checkOut);
+      if (checkInDate < bookedOut && checkOutDate > bookedIn) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const handleCheckAvailability = () => {
-    if (!checkIn || !checkOut) { alert("Please select check-in and check-out dates."); return; }
-    if (new Date(checkOut) <= new Date(checkIn)) { alert("Check-out must be after check-in."); return; }
+    setDateError("");
+    if (!checkIn || !checkOut) { setDateError("Please select check-in and check-out dates."); return; }
+    if (new Date(checkOut) <= new Date(checkIn)) { setDateError("Check-out must be after check-in."); return; }
+    if (new Date(checkIn) < new Date(new Date().toDateString())) { setDateError("Check-in date cannot be in the past."); return; }
+    if (checkDateConflict(checkIn, checkOut)) {
+      setDateError("These dates are already booked. Please select different dates.");
+      return;
+    }
+    if (guests > listing.guestCapacity) { setDateError(`Maximum ${listing.guestCapacity} guests allowed.`); return; }
     navigate(`/booking/${id}/confirm?checkIn=${checkIn}&checkOut=${checkOut}&guests=${guests}`);
   };
 
@@ -34,11 +62,12 @@ export default function ListingDetails() {
   );
   if (!listing) return <div style={{ padding: "60px", textAlign: "center", color: "#64748b" }}>Listing not found.</div>;
 
-  const images = listing.imageUrls ? listing.imageUrls.split(",").map(s => s.trim()) : [];
+  const images = listing.imageUrls ? listing.imageUrls.split(",").map(s => s.trim()).filter(Boolean) : [];
+  const hasImages = images.length > 0;
   const [main, img2, img3] = [
-    images[0] || "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9",
-    images[1] || "https://images.unsplash.com/photo-1512917774080-9991f1c4c750",
-    images[2] || "https://images.unsplash.com/photo-1600585154340-be6161a56a0c",
+    images[0] || null,
+    images[1] || null,
+    images[2] || null,
   ];
   const amenitiesList = listing.amenities ? listing.amenities.split(",").map(a => a.trim()) : [];
 
@@ -52,8 +81,8 @@ export default function ListingDetails() {
     return <Check size={17} color="#0ea5e9" />;
   };
 
-  // Calculate preview price
   const nights = (checkIn && checkOut) ? Math.max(1, Math.ceil((new Date(checkOut) - new Date(checkIn)) / 86400000)) : 1;
+  const today = new Date().toISOString().split("T")[0];
 
   return (
     <div style={{ backgroundColor: "#f8fafc", minHeight: "100vh", paddingBottom: "80px" }}>
@@ -72,24 +101,32 @@ export default function ListingDetails() {
         </div>
 
         {/* Photo Grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px", height: "440px", borderRadius: "20px", overflow: "hidden", marginBottom: "40px", animation: "fadeIn 0.4s ease 0.1s both" }}>
-          <div style={{ overflow: "hidden" }}>
-            <img src={main} alt="main" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.4s ease" }}
-              onMouseEnter={e => e.target.style.transform = "scale(1.03)"}
-              onMouseLeave={e => e.target.style.transform = "scale(1)"} />
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <img src={img2} alt="img2" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.4s ease" }}
-                onMouseEnter={e => e.target.style.transform = "scale(1.05)"}
+        <div style={{ display: "grid", gridTemplateColumns: img2 ? "2fr 1fr" : "1fr", gap: "12px", height: "440px", borderRadius: "20px", overflow: "hidden", marginBottom: "40px", animation: "fadeIn 0.4s ease 0.1s both" }}>
+          {main ? (
+            <div style={{ overflow: "hidden" }}>
+              <img src={main} alt="main" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.4s ease" }}
+                onMouseEnter={e => e.target.style.transform = "scale(1.03)"}
                 onMouseLeave={e => e.target.style.transform = "scale(1)"} />
             </div>
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <img src={img3} alt="img3" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.4s ease" }}
-                onMouseEnter={e => e.target.style.transform = "scale(1.05)"}
-                onMouseLeave={e => e.target.style.transform = "scale(1)"} />
+          ) : (
+            <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #dbeafe, #bfdbfe)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "64px" }}>🏡</div>
+          )}
+          {img2 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <img src={img2} alt="img2" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.4s ease" }}
+                  onMouseEnter={e => e.target.style.transform = "scale(1.05)"}
+                  onMouseLeave={e => e.target.style.transform = "scale(1)"} />
+              </div>
+              {img3 && (
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <img src={img3} alt="img3" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.4s ease" }}
+                    onMouseEnter={e => e.target.style.transform = "scale(1.05)"}
+                    onMouseLeave={e => e.target.style.transform = "scale(1)"} />
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: "60px", flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -111,9 +148,13 @@ export default function ListingDetails() {
                   ))}
                 </div>
               </div>
-              <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "linear-gradient(135deg, #0ea5e9, #38bdf8)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "18px" }}>
-                {listing.host?.fullname?.charAt(0) || "?"}
-              </div>
+              {listing.host?.profilePictureUrl ? (
+                <img src={listing.host.profilePictureUrl} alt="" style={{ width: "52px", height: "52px", borderRadius: "50%", objectFit: "cover" }} />
+              ) : (
+                <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "linear-gradient(135deg, #0ea5e9, #38bdf8)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "18px" }}>
+                  {listing.host?.fullname?.charAt(0) || "?"}
+                </div>
+              )}
             </div>
 
             {/* Badges */}
@@ -141,6 +182,25 @@ export default function ListingDetails() {
                 ))}
               </div>
             ) : <p style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "14px" }}>No specific amenities listed.</p>}
+
+            {/* Booked dates info */}
+            {bookedDates.length > 0 && (
+              <div style={{ marginTop: "32px" }}>
+                <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>📅 Unavailable Dates</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {bookedDates.map((bd, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", background: "#fef2f2", borderRadius: "10px", border: "1px solid #fecaca", fontSize: "13px", color: "#991b1b" }}>
+                      <span style={{ fontWeight: 600 }}>{bd.checkIn}</span>
+                      <span style={{ color: "#dc2626" }}>→</span>
+                      <span style={{ fontWeight: 600 }}>{bd.checkOut}</span>
+                      <span style={{ marginLeft: "auto", padding: "2px 8px", background: bd.status === "ACCEPTED" ? "#dcfce7" : "#fef3c7", borderRadius: "999px", fontSize: "11px", fontWeight: 700, color: bd.status === "ACCEPTED" ? "#166534" : "#854d0e" }}>
+                        {bd.status === "ACCEPTED" ? "Confirmed" : "Pending"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Column: Sticky Booking Card */}
@@ -155,11 +215,11 @@ export default function ListingDetails() {
                 <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0" }}>
                   <div style={{ flex: 1, padding: "14px 16px", borderRight: "1px solid #e2e8f0" }}>
                     <div style={{ fontSize: "10px", fontWeight: 800, color: "#0ea5e9", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>CHECK-IN</div>
-                    <input type="date" value={checkIn} onChange={e => setCheckIn(e.target.value)} style={{ border: "none", fontSize: "14px", outline: "none", background: "transparent", width: "100%", fontFamily: "Inter, sans-serif", color: "#0f172a", fontWeight: 500 }} />
+                    <input type="date" value={checkIn} onChange={e => { setCheckIn(e.target.value); setDateError(""); }} min={today} style={{ border: "none", fontSize: "14px", outline: "none", background: "transparent", width: "100%", fontFamily: "Inter, sans-serif", color: "#0f172a", fontWeight: 500 }} />
                   </div>
                   <div style={{ flex: 1, padding: "14px 16px" }}>
                     <div style={{ fontSize: "10px", fontWeight: 800, color: "#0ea5e9", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>CHECK-OUT</div>
-                    <input type="date" value={checkOut} onChange={e => setCheckOut(e.target.value)} style={{ border: "none", fontSize: "14px", outline: "none", background: "transparent", width: "100%", fontFamily: "Inter, sans-serif", color: "#0f172a", fontWeight: 500 }} />
+                    <input type="date" value={checkOut} onChange={e => { setCheckOut(e.target.value); setDateError(""); }} min={checkIn || today} style={{ border: "none", fontSize: "14px", outline: "none", background: "transparent", width: "100%", fontFamily: "Inter, sans-serif", color: "#0f172a", fontWeight: 500 }} />
                   </div>
                 </div>
                 <div style={{ padding: "14px 16px" }}>
@@ -168,16 +228,28 @@ export default function ListingDetails() {
                 </div>
               </div>
 
+              {dateError && (
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", background: "#fef2f2", color: "#991b1b", padding: "10px 14px", borderRadius: "10px", marginBottom: "14px", fontSize: "13px" }}>
+                  <AlertCircle size={15} /> {dateError}
+                </div>
+              )}
+
               {checkIn && checkOut && new Date(checkOut) > new Date(checkIn) && (
-                <div style={{ background: "#f0f9ff", borderRadius: "10px", padding: "12px 16px", marginBottom: "14px", fontSize: "13px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#475569", marginBottom: "6px" }}>
-                    <span>₱{listing.pricePerNight?.toLocaleString()} × {nights} night{nights !== 1 ? "s" : ""}</span>
-                    <span style={{ fontWeight: 600 }}>₱{(listing.pricePerNight * nights)?.toLocaleString()}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", color: "#0f172a", fontWeight: 700, borderTop: "1px solid #bae6fd", paddingTop: "8px", marginTop: "4px" }}>
-                    <span>Est. Total</span>
-                    <span>₱{(listing.pricePerNight * nights + 3080)?.toLocaleString()}</span>
-                  </div>
+                <div style={{ background: checkDateConflict(checkIn, checkOut) ? "#fef2f2" : "#f0f9ff", borderRadius: "10px", padding: "12px 16px", marginBottom: "14px", fontSize: "13px", border: checkDateConflict(checkIn, checkOut) ? "1px solid #fecaca" : "none" }}>
+                  {checkDateConflict(checkIn, checkOut) ? (
+                    <div style={{ color: "#991b1b", fontWeight: 600 }}>⚠️ Selected dates conflict with existing bookings</div>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "#475569", marginBottom: "6px" }}>
+                        <span>₱{listing.pricePerNight?.toLocaleString()} × {nights} night{nights !== 1 ? "s" : ""}</span>
+                        <span style={{ fontWeight: 600 }}>₱{(listing.pricePerNight * nights)?.toLocaleString()}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", color: "#0f172a", fontWeight: 700, borderTop: "1px solid #bae6fd", paddingTop: "8px", marginTop: "4px" }}>
+                        <span>Est. Total</span>
+                        <span>₱{(listing.pricePerNight * nights + 3080)?.toLocaleString()}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

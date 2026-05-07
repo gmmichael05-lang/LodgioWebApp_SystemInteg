@@ -53,4 +53,24 @@ public class UserService {
             return userRepository.save(user);
         });
     }
+
+    /**
+     * Update additional contact numbers (comma-separated string).
+     */
+    public Optional<User> updateContactNumbers(UUID id, String contactNumbers) {
+        return userRepository.findById(id).map(user -> {
+            user.setContactNumbers(contactNumbers);
+            return userRepository.save(user);
+        });
+    }
+
+    /**
+     * Update saved payment cards (JSON string).
+     */
+    public Optional<User> updateSavedCards(UUID id, String savedCards) {
+        return userRepository.findById(id).map(user -> {
+            user.setSavedCards(savedCards);
+            return userRepository.save(user);
+        });
+    }
 }

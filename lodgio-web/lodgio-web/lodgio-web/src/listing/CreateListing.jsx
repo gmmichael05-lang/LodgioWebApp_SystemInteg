@@ -1,13 +1,15 @@
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Info, Phone, BarChart2, Image as ImageIcon } from "lucide-react";
+import { Info, Phone, BarChart2, Image as ImageIcon, Upload, X, LoaderCircle } from "lucide-react";
+import { supabase } from "../supabase";
 
 const PROPERTY_TYPES = ["Apartment", "Villa", "House", "Condo", "Studio", "Loft", "Other"];
 
 export default function CreateListing() {
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
 
   // Form fields
   const [title, setTitle] = useState("");
@@ -19,8 +21,11 @@ export default function CreateListing() {
   const [guestCapacity, setGuestCapacity] = useState("2");
   const [beds, setBeds] = useState("1");
   const [baths, setBaths] = useState("1");
-  const [imageUrls, setImageUrls] = useState("");
   const [amenities, setAmenities] = useState("");
+
+  // Image upload state
+  const [imageFiles, setImageFiles] = useState([]); // { file, preview, uploading, url }
+  const [imageError, setImageError] = useState("");
 
   const [userId, setUserId] = useState(null);
   const [contactOptions, setContactOptions] = useState([]);
@@ -36,7 +41,6 @@ export default function CreateListing() {
       .then(r => r.json())
       .then(d => {
         setUserId(d.id);
-        // Gather all contact numbers stored on the user
         const contacts = [];
         if (d.mobileNumber) contacts.push(d.mobileNumber);
         if (d.contactNumbers) {
@@ -49,27 +53,108 @@ export default function CreateListing() {
       });
   }, [navigate]);
 
+  // ─── Image handling ───
+  const handleSelectFiles = (e) => {
+    const files = Array.from(e.target.files);
+    setImageError("");
+    const newImages = [];
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        setImageError("Only image files (JPEG, PNG) are allowed.");
+        continue;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setImageError("Each image must be less than 5MB.");
+        continue;
+      }
+      if (imageFiles.length + newImages.length >= 10) {
+        setImageError("Maximum 10 images allowed.");
+        break;
+      }
+      newImages.push({
+        id: Date.now() + Math.random(),
+        file,
+        preview: URL.createObjectURL(file),
+        uploading: false,
+        url: null
+      });
+    }
+    setImageFiles(prev => [...prev, ...newImages]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeImage = (id) => {
+    setImageFiles(prev => {
+      const img = prev.find(i => i.id === id);
+      if (img?.preview) URL.revokeObjectURL(img.preview);
+      return prev.filter(i => i.id !== id);
+    });
+  };
+
+  const uploadAllImages = async () => {
+    const uploaded = [];
+    for (let i = 0; i < imageFiles.length; i++) {
+      const img = imageFiles[i];
+      if (img.url) { uploaded.push(img.url); continue; }
+
+      setImageFiles(prev => prev.map(im =>
+        im.id === img.id ? { ...im, uploading: true } : im
+      ));
+
+      const fileExt = img.file.name.split(".").pop();
+      const filePath = `listing-images/${userId}/${Date.now()}_${i}.${fileExt}`;
+      const { error } = await supabase.storage
+        .from("avatars")
+        .upload(filePath, img.file, { upsert: true });
+
+      if (error) throw new Error(`Failed to upload image ${i + 1}`);
+
+      const { data: publicUrlData } = supabase.storage
+        .from("avatars")
+        .getPublicUrl(filePath);
+
+      uploaded.push(publicUrlData.publicUrl);
+
+      setImageFiles(prev => prev.map(im =>
+        im.id === img.id ? { ...im, uploading: false, url: publicUrlData.publicUrl } : im
+      ));
+    }
+    return uploaded;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!userId) return;
-    setIsSubmitting(true);
 
-    const payload = {
-      title,
-      description,
-      pricePerNight: parseFloat(pricePerNight),
-      guestCapacity: parseInt(guestCapacity),
-      beds: parseInt(beds),
-      baths: parseInt(baths),
-      city,
-      type,
-      location: city,
-      imageUrls,
-      amenities,
-      host: { id: userId }
-    };
+    // Validate images are provided
+    if (imageFiles.length === 0) {
+      setImageError("Please upload at least one image of your property before publishing.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setImageError("");
 
     try {
+      // Upload images to Supabase storage
+      const uploadedUrls = await uploadAllImages();
+      const imageUrlsStr = uploadedUrls.join(",");
+
+      const payload = {
+        title,
+        description,
+        pricePerNight: parseFloat(pricePerNight),
+        guestCapacity: parseInt(guestCapacity),
+        beds: parseInt(beds),
+        baths: parseInt(baths),
+        city,
+        type,
+        location: city,
+        imageUrls: imageUrlsStr,
+        amenities,
+        host: { id: userId }
+      };
+
       const res = await fetch(`${API}/listings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -81,7 +166,7 @@ export default function CreateListing() {
         alert("Failed to create listing. Please try again.");
       }
     } catch (e) {
-      alert("Network error.");
+      setImageError(e.message || "Upload failed.");
     } finally {
       setIsSubmitting(false);
     }
@@ -150,6 +235,9 @@ export default function CreateListing() {
             ) : (
               <input value={contactNumber} onChange={e => setContactNumber(e.target.value)} placeholder="e.g. 09123456789" style={inputStyle} />
             )}
+            <p style={{ fontSize: "12px", color: "#94a3b8", marginTop: "6px" }}>
+              💡 You can add more contacts from your <span style={{ color: "#0ea5e9", cursor: "pointer", fontWeight: 600 }} onClick={() => navigate("/profile")}>Profile page</span>.
+            </p>
           </div>
         </div>
 
@@ -179,24 +267,69 @@ export default function CreateListing() {
           </div>
         </div>
 
-        {/* Section 4: Media */}
+        {/* Section 4: Media - FILE UPLOAD */}
         <div style={sectionStyle}>
           <div style={sectionHeaderStyle}>
             <div style={sectionIconStyle}><ImageIcon size={18} color="#3b82f6" /></div>
-            <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0f172a" }}>Media</h2>
+            <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0f172a" }}>Property Photos <span style={{ color: "#ef4444", fontSize: "14px" }}>*</span></h2>
           </div>
-          <div style={{ marginBottom: "16px" }}>
-            <label style={labelStyle}>Image URLs (comma separated)</label>
-            <input value={imageUrls} onChange={e => setImageUrls(e.target.value)} placeholder="https://..." style={inputStyle} />
+
+          <input ref={fileInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={handleSelectFiles} style={{ display: "none" }} />
+
+          {/* Upload zone */}
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: "2px dashed #cbd5e1", borderRadius: "12px", padding: "32px",
+              textAlign: "center", cursor: "pointer", marginBottom: "16px",
+              background: "linear-gradient(135deg, #f8fafc, #f0f9ff)",
+              transition: "border-color 0.2s"
+            }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = "#0ea5e9"}
+            onMouseLeave={e => e.currentTarget.style.borderColor = "#cbd5e1"}
+          >
+            <Upload size={32} color="#0ea5e9" style={{ marginBottom: "8px" }} />
+            <p style={{ fontWeight: 700, color: "#0f172a", marginBottom: "4px" }}>Click to upload photos</p>
+            <p style={{ fontSize: "13px", color: "#94a3b8" }}>JPEG, PNG or WebP • Max 5MB each • Up to 10 photos</p>
           </div>
-          <div>
+
+          {imageError && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "#fef2f2", color: "#991b1b", padding: "12px", borderRadius: "10px", marginBottom: "16px", fontSize: "14px" }}>
+              ⚠️ {imageError}
+            </div>
+          )}
+
+          {/* Image previews */}
+          {imageFiles.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "12px" }}>
+              {imageFiles.map((img, idx) => (
+                <div key={img.id} style={{ position: "relative", borderRadius: "10px", overflow: "hidden", aspectRatio: "1", border: "1px solid #e2e8f0" }}>
+                  <img src={img.preview} alt={`Preview ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  {img.uploading && (
+                    <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.8)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <LoaderCircle size={24} color="#0ea5e9" style={{ animation: "spin 1s linear infinite" }} />
+                    </div>
+                  )}
+                  {idx === 0 && (
+                    <span style={{ position: "absolute", bottom: "6px", left: "6px", background: "#0ea5e9", color: "#fff", padding: "2px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700 }}>COVER</span>
+                  )}
+                  <button type="button" onClick={(e) => { e.stopPropagation(); removeImage(img.id); }}
+                    style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" }}>
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ marginTop: "20px" }}>
             <label style={labelStyle}>Amenities (comma separated)</label>
             <input value={amenities} onChange={e => setAmenities(e.target.value)} placeholder="Wifi, Pool, Gym" style={inputStyle} />
           </div>
         </div>
 
         <button type="submit" disabled={isSubmitting} style={{ width: "100%", padding: "18px", backgroundColor: "#0ea5e9", color: "white", border: "none", borderRadius: "12px", fontSize: "16px", fontWeight: 700, cursor: "pointer", opacity: isSubmitting ? 0.7 : 1 }}>
-          {isSubmitting ? "Publishing..." : "Publish Listing"}
+          {isSubmitting ? "Uploading & Publishing..." : "Publish Listing"}
         </button>
       </form>
     </div>

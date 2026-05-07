@@ -62,4 +62,23 @@ public class UserController {
         }
         return ResponseEntity.notFound().build();
     }
+
+    @PutMapping("/{id}/contacts")
+    public ResponseEntity<UserDTO> updateContactNumbers(
+            @PathVariable("id") UUID id,
+            @RequestBody String contactNumbers) {
+        String clean = contactNumbers.replace("\"", "");
+        return userService.updateContactNumbers(id, clean)
+                .map(user -> ResponseEntity.ok(UserDTO.from(user)))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/{id}/cards")
+    public ResponseEntity<UserDTO> updateSavedCards(
+            @PathVariable("id") UUID id,
+            @RequestBody String savedCards) {
+        return userService.updateSavedCards(id, savedCards)
+                .map(user -> ResponseEntity.ok(UserDTO.from(user)))
+                .orElse(ResponseEntity.notFound().build());
+    }
 }

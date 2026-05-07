@@ -7,6 +7,7 @@ import com.lodgio.lodgio.user.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -63,12 +64,27 @@ public class BookingService {
             Optional<Listing> listing = listingService.getListingById(booking.getListing().getId());
 
             if (guest.isPresent() && listing.isPresent()) {
+                // Calendar blocking: reject if dates overlap with existing bookings
+                if (hasDateConflict(booking.getListing().getId(),
+                        booking.getCheckInDate(), booking.getCheckOutDate())) {
+                    return Optional.empty();
+                }
                 booking.setGuest(guest.get());
                 booking.setListing(listing.get());
                 return Optional.of(bookingRepository.save(booking));
             }
         }
         return Optional.empty();
+    }
+
+    // ─── Calendar blocking helpers ───
+
+    public boolean hasDateConflict(UUID listingId, LocalDate checkIn, LocalDate checkOut) {
+        return !bookingRepository.findOverlappingBookings(listingId, checkIn, checkOut).isEmpty();
+    }
+
+    public List<Booking> getActiveBookingsForListing(UUID listingId) {
+        return bookingRepository.findActiveBookingsByListingId(listingId);
     }
 
     // ─── Update status ───
