@@ -1,13 +1,14 @@
-﻿const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
 import React, { useState, useEffect } from "react";
-import { Plus, Trash2, Check, X, MapPin, Calendar, UserRound, Mail, Phone, Image, BarChart2 } from "lucide-react";
+import { Plus, Trash2, Check, X, MapPin, Calendar, UserRound, Mail, Phone, Image, BarChart2, ToggleLeft, ToggleRight, TrendingUp, DollarSign } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
 export default function HostDashboard() {
   const navigate = useNavigate();
   const [myListings, setMyListings] = useState([]);
   const [bookingRequests, setBookingRequests] = useState([]);
+  const [allBookings, setAllBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [backendUser, setBackendUser] = useState(null);
@@ -29,6 +30,7 @@ export default function HostDashboard() {
       const bookingsRes = await fetch(`${API}/bookings/host/${u.email}`);
       if (bookingsRes.ok) {
         const all = await bookingsRes.json();
+        setAllBookings(all);
         setBookingRequests(all.filter(b => b.status === "PENDING" || b.status === "ACCEPTED"));
       }
     } catch (e) {
@@ -53,6 +55,11 @@ export default function HostDashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status })
     });
+    fetchHostData();
+  };
+
+  const handleToggleActive = async (id) => {
+    await fetch(`${API}/listings/${id}/toggle-active`, { method: "PUT" });
     fetchHostData();
   };
 
@@ -102,6 +109,7 @@ export default function HostDashboard() {
               { label: "My Listings", value: myListings.length, icon: <MapPin size={15} /> },
               { label: "Active Requests", value: bookingRequests.filter(b => b.status === "PENDING").length, icon: <Calendar size={15} /> },
               { label: "Accepted", value: bookingRequests.filter(b => b.status === "ACCEPTED").length, icon: <Check size={15} /> },
+              { label: "Total Revenue", value: `₱${allBookings.filter(b => b.status === "ACCEPTED").reduce((s, b) => s + (b.totalPrice || 0), 0).toLocaleString()}`, icon: <TrendingUp size={15} /> },
             ].map(s => (
               <div key={s.label} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 16px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px", backdropFilter: "blur(8px)" }}>
                 <span style={{ color: "#38bdf8" }}>{s.icon}</span>
@@ -115,6 +123,135 @@ export default function HostDashboard() {
 
       <div style={{ maxWidth: "900px", margin: "0 auto", padding: "0 20px" }}>
 
+        {/* ──────── Revenue Analytics ──────── */}
+        {(() => {
+          const accepted = allBookings.filter(b => b.status === "ACCEPTED");
+          const totalRevenue = accepted.reduce((s, b) => s + (b.totalPrice || 0), 0);
+          const totalBookings = accepted.length;
+          const avgBooking = totalBookings > 0 ? Math.round(totalRevenue / totalBookings) : 0;
+
+          // Monthly revenue for the last 6 months
+          const now = new Date();
+          const months = [];
+          for (let i = 5; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString("en-US", { month: "short" }) });
+          }
+          const monthlyData = months.map(m => {
+            const sum = accepted
+              .filter(b => {
+                const bd = new Date(b.createdAt || b.checkInDate);
+                return bd.getFullYear() === m.year && bd.getMonth() === m.month;
+              })
+              .reduce((s, b) => s + (b.totalPrice || 0), 0);
+            return { ...m, revenue: sum };
+          });
+          const maxRev = Math.max(...monthlyData.map(m => m.revenue), 1);
+
+          // Per-listing breakdown
+          const listingRevMap = {};
+          accepted.forEach(b => {
+            const key = b.listing?.id;
+            if (!key) return;
+            if (!listingRevMap[key]) listingRevMap[key] = { title: b.listing?.title || "Untitled", city: b.listing?.city || "", count: 0, total: 0 };
+            listingRevMap[key].count++;
+            listingRevMap[key].total += (b.totalPrice || 0);
+          });
+          const listingRevenue = Object.values(listingRevMap).sort((a, b) => b.total - a.total);
+
+          return (
+            <div style={cardStyle}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+                <div style={{ background: "linear-gradient(135deg, #f0fdf4, #dcfce7)", padding: "10px", borderRadius: "10px" }}><BarChart2 size={20} color="#16a34a" /></div>
+                <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#0f172a" }}>Revenue Analytics</h2>
+              </div>
+              <p style={{ color: "#64748b", fontSize: "14px", marginBottom: "24px" }}>Track your earnings and booking performance.</p>
+
+              {/* Summary Cards Row */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "32px" }}>
+                {[
+                  { label: "Total Revenue", value: `₱${totalRevenue.toLocaleString()}`, sub: `From ${totalBookings} booking${totalBookings !== 1 ? "s" : ""}`, gradient: "linear-gradient(135deg, #0ea5e9, #0284c7)", icon: <DollarSign size={22} /> },
+                  { label: "Avg. per Booking", value: `₱${avgBooking.toLocaleString()}`, sub: "Average transaction", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", icon: <TrendingUp size={22} /> },
+                  { label: "Occupancy Rate", value: myListings.length > 0 ? `${Math.round((totalBookings / Math.max(myListings.length, 1)) * 100)}%` : "0%", sub: `${totalBookings} bookings / ${myListings.length} listing${myListings.length !== 1 ? "s" : ""}`, gradient: "linear-gradient(135deg, #f97316, #ea580c)", icon: <Calendar size={22} /> },
+                ].map((c, i) => (
+                  <div key={i} style={{ background: c.gradient, borderRadius: "16px", padding: "24px", color: "#fff", position: "relative", overflow: "hidden" }}>
+                    <div style={{ position: "absolute", top: "-20px", right: "-20px", width: "90px", height: "90px", borderRadius: "50%", background: "rgba(255,255,255,0.1)" }} />
+                    <div style={{ position: "absolute", bottom: "-15px", right: "10px", width: "50px", height: "50px", borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", opacity: 0.85 }}>
+                      {c.icon}
+                      <span style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>{c.label}</span>
+                    </div>
+                    <div style={{ fontSize: "1.75rem", fontWeight: 900, marginBottom: "4px" }}>{c.value}</div>
+                    <div style={{ fontSize: "12px", opacity: 0.7 }}>{c.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Monthly Revenue Bar Chart */}
+              <div style={{ marginBottom: "32px" }}>
+                <h3 style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "16px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Monthly Revenue (Last 6 Months)</h3>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", height: "200px", padding: "0 8px" }}>
+                  {monthlyData.map((m, i) => {
+                    const pct = maxRev > 0 ? (m.revenue / maxRev) * 100 : 0;
+                    const barHeight = Math.max(pct, 2);
+                    return (
+                      <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+                        {/* Revenue label above bar */}
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: m.revenue > 0 ? "#0f172a" : "#cbd5e1", whiteSpace: "nowrap" }}>
+                          {m.revenue > 0 ? `₱${m.revenue >= 1000 ? `${(m.revenue / 1000).toFixed(1)}k` : m.revenue.toLocaleString()}` : "—"}
+                        </div>
+                        {/* Bar */}
+                        <div style={{ width: "100%", height: `${barHeight}%`, minHeight: "4px", background: m.revenue > 0 ? "linear-gradient(180deg, #0ea5e9, #0284c7)" : "#f1f5f9", borderRadius: "8px 8px 4px 4px", transition: "height 0.6s ease", position: "relative" }}>
+                          {m.revenue > 0 && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "50%", background: "linear-gradient(180deg, rgba(255,255,255,0.25), transparent)", borderRadius: "8px 8px 0 0" }} />}
+                        </div>
+                        {/* Month label */}
+                        <div style={{ fontSize: "12px", fontWeight: 600, color: "#64748b" }}>{m.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Per-Listing Revenue Breakdown */}
+              {listingRevenue.length > 0 && (
+                <div>
+                  <h3 style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a", marginBottom: "16px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Revenue by Listing</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {listingRevenue.map((lr, i) => {
+                      const pct = totalRevenue > 0 ? (lr.total / totalRevenue) * 100 : 0;
+                      return (
+                        <div key={i} style={{ background: "#f8fafc", border: "1px solid #f1f5f9", borderRadius: "12px", padding: "16px 20px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>{lr.title}</div>
+                              <div style={{ fontSize: "12px", color: "#94a3b8" }}>{lr.city} · {lr.count} booking{lr.count !== 1 ? "s" : ""}</div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ fontWeight: 800, fontSize: "16px", color: "#0f172a" }}>₱{lr.total.toLocaleString()}</div>
+                              <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 600 }}>{pct.toFixed(1)}% of total</div>
+                            </div>
+                          </div>
+                          {/* Progress bar */}
+                          <div style={{ height: "6px", background: "#e2e8f0", borderRadius: "99px", overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${pct}%`, background: "linear-gradient(90deg, #0ea5e9, #38bdf8)", borderRadius: "99px", transition: "width 0.8s ease" }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {totalBookings === 0 && (
+                <div style={{ textAlign: "center", padding: "40px 24px", color: "#94a3b8", background: "#f8fafc", borderRadius: "12px", border: "2px dashed #e2e8f0" }}>
+                  <div style={{ fontSize: "40px", marginBottom: "12px" }}>📊</div>
+                  <p style={{ fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>No revenue data yet</p>
+                  <p style={{ fontSize: "13px" }}>Revenue will appear here once you accept bookings.</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ──────── Booking Requests ──────── */}
         <div style={cardStyle}>
@@ -189,7 +326,7 @@ export default function HostDashboard() {
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "16px" }}>
               {myListings.map(lst => (
-                <div key={lst.id} style={{ borderRadius: "12px", overflow: "hidden", position: "relative", cursor: "pointer" }}>
+                <div key={lst.id} style={{ borderRadius: "12px", overflow: "hidden", position: "relative", cursor: "pointer", opacity: lst.isActive === false ? 0.6 : 1, transition: "opacity 0.3s" }}>
                   {lst.imageUrls ? (
                     <img src={lst.imageUrls.split(",")[0].trim()} alt={lst.title} style={{ width: "100%", height: "130px", objectFit: "cover", display: "block" }} />
                   ) : (
@@ -199,13 +336,24 @@ export default function HostDashboard() {
                   <div style={{ position: "absolute", top: "8px", left: "8px", background: "rgba(0,0,0,0.7)", color: "#fff", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: 700 }}>
                     ₱{lst.pricePerNight?.toLocaleString()}/night
                   </div>
-                  {/* Delete button */}
-                  <button onClick={() => handleDeleteListing(lst.id)} style={{ position: "absolute", top: "8px", right: "8px", background: "#fff", border: "none", width: "28px", height: "28px", borderRadius: "50%", color: "#ef4444", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 4px rgba(0,0,0,0.2)" }}>
-                    <Trash2 size={14} />
-                  </button>
+                  {/* Paused badge */}
+                  {lst.isActive === false && (
+                    <div style={{ position: "absolute", top: "8px", right: "8px", background: "#fef08a", color: "#854d0e", padding: "3px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700 }}>PAUSED</div>
+                  )}
                   <div style={{ padding: "10px 0 0" }}>
                     <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: 700 }}>{lst.type || "Property"}</div>
                     <div style={{ fontSize: "13px", fontWeight: 600, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lst.title}</div>
+                    {/* Action buttons */}
+                    <div style={{ display: "flex", gap: "6px", marginTop: "8px" }}>
+                      <button onClick={() => handleToggleActive(lst.id)} title={lst.isActive === false ? "Unpublish" : "Pause"}
+                        style={{ display: "flex", alignItems: "center", gap: "4px", background: lst.isActive === false ? "#fef3c7" : "#dcfce7", border: "none", borderRadius: "6px", padding: "4px 10px", cursor: "pointer", fontSize: "11px", fontWeight: 600, color: lst.isActive === false ? "#854d0e" : "#166534" }}>
+                        {lst.isActive === false ? <><ToggleLeft size={13} /> Resume</> : <><ToggleRight size={13} /> Active</>}
+                      </button>
+                      <button onClick={() => handleDeleteListing(lst.id)}
+                        style={{ display: "flex", alignItems: "center", gap: "4px", background: "#fef2f2", border: "none", borderRadius: "6px", padding: "4px 8px", cursor: "pointer", color: "#ef4444" }}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

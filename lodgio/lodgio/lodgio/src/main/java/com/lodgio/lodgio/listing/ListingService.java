@@ -32,11 +32,16 @@ public class ListingService {
     }
 
     public List<Listing> getActiveListings() {
-        return listingRepository.findByStatus("ACTIVE");
+        return listingRepository.findByStatus("ACTIVE").stream()
+                .filter(l -> l.getIsActive() == null || l.getIsActive())
+                .collect(Collectors.toList());
     }
 
     public List<Listing> searchListings(String query) {
-        return listingRepository.findByTitleContainingIgnoreCaseOrCityContainingIgnoreCase(query, query);
+        return listingRepository.findByTitleContainingIgnoreCaseOrCityContainingIgnoreCase(query, query)
+                .stream()
+                .filter(l -> l.getIsActive() == null || l.getIsActive())
+                .collect(Collectors.toList());
     }
 
     public Optional<Listing> getListingById(UUID id) {
@@ -126,5 +131,15 @@ public class ListingService {
     public void deleteListing(UUID id) {
         bookingRepository.deleteByListingId(id);
         listingRepository.deleteById(id);
+    }
+
+    /**
+     * Toggle the isActive flag on a listing (pause / unpublish).
+     */
+    public Optional<Listing> toggleActive(UUID id) {
+        return listingRepository.findById(id).map(listing -> {
+            listing.setIsActive(listing.getIsActive() == null || !listing.getIsActive());
+            return listingRepository.save(listing);
+        });
     }
 }

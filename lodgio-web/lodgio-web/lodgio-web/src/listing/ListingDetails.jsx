@@ -2,7 +2,7 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MapPin, Wifi, Wind, Droplet, Dumbbell, Car, Check, Users, Bed, Bath, Star, Shield, AlertCircle } from "lucide-react";
+import { MapPin, Wifi, Wind, Droplet, Dumbbell, Car, Check, Users, Bed, Bath, Star, Shield, AlertCircle, Share2, Heart } from "lucide-react";
 
 export default function ListingDetails() {
   const { id } = useParams();
@@ -14,6 +14,10 @@ export default function ListingDetails() {
   const [guests, setGuests] = useState(2);
   const [bookedDates, setBookedDates] = useState([]);
   const [dateError, setDateError] = useState("");
+  const [reviews, setReviews] = useState([]);
+  const [reviewSummary, setReviewSummary] = useState({ averageRating: 0, reviewCount: 0 });
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [shareMsg, setShareMsg] = useState("");
 
   useEffect(() => {
     Promise.all([
@@ -23,8 +27,36 @@ export default function ListingDetails() {
       setListing(data);
       setBookedDates(dates || []);
       setLoading(false);
+      // Fetch reviews
+      fetch(`${API}/reviews/listing/${id}`).then(r => r.ok ? r.json() : []).then(setReviews);
+      fetch(`${API}/reviews/listing/${id}/summary`).then(r => r.ok ? r.json() : {}).then(s => setReviewSummary(s || { averageRating: 0, reviewCount: 0 }));
+      // Fetch favorite status
+      const u = getUser();
+      if (u?.email) fetch(`${API}/favorites/${u.email}/${id}`).then(r => r.ok ? r.json() : {}).then(d => setIsFavorited(d.favorited || false));
     }).catch(() => setLoading(false));
   }, [id]);
+
+  const getUser = () => { try { return JSON.parse(window.localStorage.getItem("lodgio_user")); } catch { return null; } };
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareMsg("Link copied!");
+      setTimeout(() => setShareMsg(""), 2000);
+    } catch { setShareMsg("Copy failed"); }
+  };
+
+  const toggleFav = async () => {
+    const u = getUser(); if (!u?.email) return;
+    if (isFavorited) {
+      await fetch(`${API}/favorites/${u.email}/${id}`, { method: "DELETE" });
+      setIsFavorited(false);
+    } else {
+      await fetch(`${API}/favorites/${u.email}/${id}`, { method: "POST" });
+      setIsFavorited(true);
+    }
+  };
 
   // Check if selected dates overlap with booked dates
   const checkDateConflict = (ci, co) => {
@@ -96,7 +128,16 @@ export default function ListingDetails() {
               <MapPin size={15} color="#0ea5e9" />{listing.city} {listing.location ? `• ${listing.location}` : ""}
             </div>
             {listing.type && <span style={{ padding: "3px 10px", background: "#f0f9ff", color: "#0284c7", borderRadius: "999px", fontSize: "12px", fontWeight: 700 }}>{listing.type}</span>}
-            <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "#0f172a", fontSize: "13px", fontWeight: 700 }}><Star size={14} fill="#fbbf24" color="#fbbf24" />4.9 <span style={{ color: "#94a3b8", fontWeight: 400 }}>(24 reviews)</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "#0f172a", fontSize: "13px", fontWeight: 700 }}><Star size={14} fill="#fbbf24" color="#fbbf24" />{reviewSummary.averageRating > 0 ? reviewSummary.averageRating : "New"} <span style={{ color: "#94a3b8", fontWeight: 400 }}>({reviewSummary.reviewCount} review{reviewSummary.reviewCount !== 1 ? "s" : ""})</span></div>
+            {/* Share + Favorite */}
+            <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+              <button onClick={toggleFav} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", border: "1.5px solid #e2e8f0", borderRadius: "10px", background: "#fff", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: isFavorited ? "#ef4444" : "#64748b", transition: "all 0.2s" }}>
+                <Heart size={15} fill={isFavorited ? "#ef4444" : "none"} color={isFavorited ? "#ef4444" : "#64748b"} /> {isFavorited ? "Saved" : "Save"}
+              </button>
+              <button onClick={handleShare} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", border: "1.5px solid #e2e8f0", borderRadius: "10px", background: "#fff", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#64748b", transition: "all 0.2s" }}>
+                <Share2 size={15} /> {shareMsg || "Share"}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -201,6 +242,42 @@ export default function ListingDetails() {
                 </div>
               </div>
             )}
+
+            {/* ──── Reviews Section ──── */}
+            <div style={{ marginTop: "32px" }}>
+              <div style={{ height: "1px", background: "#e2e8f0", marginBottom: "28px" }} />
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#0f172a", marginBottom: "4px" }}>
+                <Star size={18} fill="#fbbf24" color="#fbbf24" style={{ verticalAlign: "-3px", marginRight: "6px" }} />
+                {reviewSummary.averageRating > 0 ? `${reviewSummary.averageRating} · ${reviewSummary.reviewCount} review${reviewSummary.reviewCount !== 1 ? "s" : ""}` : "No reviews yet"}
+              </h3>
+              {reviews.length === 0 ? (
+                <p style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "14px", marginTop: "12px" }}>Be the first to leave a review after your stay!</p>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "20px" }}>
+                  {reviews.map(r => (
+                    <div key={r.id} style={{ padding: "20px", background: "#f8fafc", borderRadius: "14px", border: "1px solid #f1f5f9" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                        {r.guest?.profilePictureUrl ? (
+                          <img src={r.guest.profilePictureUrl} alt="" style={{ width: "36px", height: "36px", borderRadius: "50%", objectFit: "cover" }} />
+                        ) : (
+                          <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "linear-gradient(135deg, #0ea5e9, #38bdf8)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "14px" }}>
+                            {r.guest?.fullname?.charAt(0) || "?"}
+                          </div>
+                        )}
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a" }}>{r.guest?.fullname || "Guest"}</div>
+                          <div style={{ fontSize: "11px", color: "#94a3b8" }}>{r.createdAt ? new Date(r.createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}</div>
+                        </div>
+                        <div style={{ marginLeft: "auto", display: "flex", gap: "2px" }}>
+                          {[1,2,3,4,5].map(s => <Star key={s} size={13} fill={s <= r.rating ? "#fbbf24" : "#e2e8f0"} color={s <= r.rating ? "#fbbf24" : "#e2e8f0"} />)}
+                        </div>
+                      </div>
+                      {r.comment && <p style={{ fontSize: "14px", color: "#475569", lineHeight: 1.6 }}>{r.comment}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right Column: Sticky Booking Card */}

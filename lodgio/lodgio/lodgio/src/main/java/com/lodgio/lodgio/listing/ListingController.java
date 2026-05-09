@@ -85,4 +85,11 @@ public class ListingController {
         }
         return ResponseEntity.notFound().build();
     }
+
+    @PutMapping("/{id}/toggle-active")
+    public ResponseEntity<ListingDTO> toggleActive(@PathVariable("id") UUID id) {
+        return listingService.toggleActive(id)
+                .map(l -> ResponseEntity.ok(ListingDTO.from(l)))
+                .orElse(ResponseEntity.notFound().build());
+    }
 }

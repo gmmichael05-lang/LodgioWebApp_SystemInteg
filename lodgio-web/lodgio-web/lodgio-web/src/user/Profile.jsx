@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   UserRound, Mail, Phone, Lock, Eye, EyeOff, AlertCircle, Trash2, Plus,
-  PenSquare, Image, LoaderCircle, MapPin, Calendar, Check, X, Edit2, Save
+  PenSquare, Image, LoaderCircle, MapPin, Calendar, Check, X, Edit2, Save, Star
 } from "lucide-react";
 import { supabase } from "../supabase";
 
@@ -59,6 +59,18 @@ export default function Profile() {
   const [cardError, setCardError] = useState("");
   const [cardSaving, setCardSaving] = useState(false);
 
+  // Review modal
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewListingId, setReviewListingId] = useState(null);
+  const [reviewBookingId, setReviewBookingId] = useState(null);
+  const [reviewListingTitle, setReviewListingTitle] = useState("");
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewSuccess, setReviewSuccess] = useState("");
+  const [reviewedBookings, setReviewedBookings] = useState(new Set());
+
   const isHost = user?.role === "HOST";
 
   const fetchAll = async () => {
@@ -85,6 +97,9 @@ export default function Profile() {
       } else {
         const bkRes = await fetch(`${API}/bookings/guest/${user.email}`);
         if (bkRes.ok) setBookingHistory(await bkRes.json());
+        
+        const revRes = await fetch(`${API}/reviews/guest/${user.email}/reviewed-bookings`);
+        if (revRes.ok) setReviewedBookings(new Set(await revRes.json()));
       }
     } catch (err) {
       setFetchError(err.message);
@@ -231,6 +246,42 @@ export default function Profile() {
     if (status === "ACCEPTED" || status === "PAID") return { bg: "#dcfce7", color: "#166534" };
     if (status === "REJECTED") return { bg: "#fee2e2", color: "#991b1b" };
     return { bg: "#fef08a", color: "#854d0e" };
+  };
+
+  const openReviewModal = (listingId, listingTitle, bookingId) => {
+    setReviewListingId(listingId);
+    setReviewBookingId(bookingId);
+    setReviewListingTitle(listingTitle);
+    setReviewRating(5);
+    setReviewComment("");
+    setReviewError("");
+    setReviewSuccess("");
+    setShowReviewModal(true);
+  };
+
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    if (!user?.email || !reviewListingId || !reviewBookingId) return;
+    setReviewSubmitting(true); setReviewError("");
+    try {
+      const res = await fetch(`${API}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: user.email, listingId: reviewListingId, bookingId: reviewBookingId, rating: reviewRating, comment: reviewComment })
+      });
+      if (res.ok) {
+        setReviewSuccess("Review submitted!");
+        setReviewedBookings(prev => {
+          const newSet = new Set(prev);
+          newSet.add(reviewBookingId);
+          return newSet;
+        });
+        setTimeout(() => setShowReviewModal(false), 1500);
+      } else {
+        setReviewError("You may have already reviewed this booking.");
+      }
+    } catch { setReviewError("Failed to submit review."); }
+    finally { setReviewSubmitting(false); }
   };
 
   if (!user) return null;
@@ -572,6 +623,15 @@ export default function Profile() {
                               <td style={{ padding: "14px 16px", fontWeight: 700, color: "#0f172a" }}>₱{b.totalPrice?.toLocaleString()}</td>
                               <td style={{ padding: "14px 16px" }}>
                                 <span style={{ padding: "4px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, background: s.bg, color: s.color }}>{b.status}</span>
+                                {b.status === "ACCEPTED" && !reviewedBookings.has(b.id) && (
+                                  <button onClick={() => openReviewModal(b.listing?.id, b.listing?.title, b.id)}
+                                    style={{ display: "block", marginTop: "6px", padding: "4px 10px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: "6px", fontSize: "11px", fontWeight: 700, color: "#854d0e", cursor: "pointer" }}>
+                                    <Star size={11} fill="#fbbf24" color="#fbbf24" style={{ verticalAlign: "-1px", marginRight: "3px" }} />Leave Review
+                                  </button>
+                                )}
+                                {reviewedBookings.has(b.id) && (
+                                  <span style={{ display: "block", marginTop: "6px", fontSize: "11px", color: "#166534", fontWeight: 600 }}>✓ Reviewed</span>
+                                )}
                               </td>
                             </tr>
                           );
@@ -625,6 +685,59 @@ export default function Profile() {
           </>
         )}
       </div>
+
+      {/* ──── Review Modal ──── */}
+      {showReviewModal && (
+        <div className="modal-overlay" onClick={() => setShowReviewModal(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{ padding: "32px", maxWidth: "440px" }}>
+            <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "#0f172a", marginBottom: "6px" }}>Leave a Review</h3>
+            <p style={{ color: "#64748b", fontSize: "14px", marginBottom: "20px" }}>{reviewListingTitle}</p>
+
+            {reviewSuccess ? (
+              <div style={{ textAlign: "center", padding: "24px", color: "#166534", fontSize: "15px", fontWeight: 600 }}>
+                <Check size={32} color="#22c55e" style={{ marginBottom: "8px" }} /><br />{reviewSuccess}
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitReview}>
+                {/* Star rating */}
+                <div style={{ marginBottom: "18px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px", display: "block" }}>Rating</label>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    {[1,2,3,4,5].map(s => (
+                      <button key={s} type="button" onClick={() => setReviewRating(s)}
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", transition: "transform 0.15s" }}
+                        onMouseEnter={e => e.currentTarget.style.transform = "scale(1.25)"} onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                        <Star size={28} fill={s <= reviewRating ? "#fbbf24" : "#e2e8f0"} color={s <= reviewRating ? "#fbbf24" : "#e2e8f0"} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Comment */}
+                <div style={{ marginBottom: "18px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px", display: "block" }}>Comment (optional)</label>
+                  <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} placeholder="Share your experience..."
+                    style={{ width: "100%", minHeight: "100px", padding: "12px 14px", border: "1.5px solid #e2e8f0", borderRadius: "12px", fontSize: "14px", fontFamily: "Inter, sans-serif", resize: "vertical", outline: "none" }}
+                    onFocus={e => e.target.style.borderColor = "#0ea5e9"} onBlur={e => e.target.style.borderColor = "#e2e8f0"} />
+                </div>
+
+                {reviewError && <div style={{ color: "#991b1b", background: "#fef2f2", padding: "8px 12px", borderRadius: "8px", fontSize: "13px", marginBottom: "14px" }}>{reviewError}</div>}
+
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button type="submit" disabled={reviewSubmitting}
+                    style={{ flex: 1, padding: "12px", background: "linear-gradient(135deg, #0ea5e9, #0284c7)", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, fontSize: "14px", cursor: "pointer", opacity: reviewSubmitting ? 0.7 : 1 }}>
+                    {reviewSubmitting ? "Submitting..." : "Submit Review"}
+                  </button>
+                  <button type="button" onClick={() => setShowReviewModal(false)}
+                    style={{ padding: "12px 20px", background: "#f1f5f9", color: "#64748b", border: "none", borderRadius: "10px", fontWeight: 600, fontSize: "14px", cursor: "pointer" }}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

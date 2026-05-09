@@ -1,7 +1,7 @@
-﻿const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
 
 import React, { useState, useEffect, useRef } from "react";
-import { MapPin, Calendar, Search, Wifi, Car, Dog, Star, ArrowRight, SlidersHorizontal, X } from "lucide-react";
+import { MapPin, Calendar, Search, Wifi, Car, Dog, Star, ArrowRight, SlidersHorizontal, X, Heart } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export default function GuestDashboard() {
@@ -9,6 +9,42 @@ export default function GuestDashboard() {
   const [feed, setFeed] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(true);
+  const [activeTab, setActiveTab] = useState("explore"); // "explore" | "saved"
+  const [favoriteIds, setFavoriteIds] = useState(new Set());
+  const [savedListings, setSavedListings] = useState([]);
+
+  const getUser = () => { try { return JSON.parse(window.localStorage.getItem("lodgio_user")); } catch { return null; } };
+
+  const fetchFavorites = async () => {
+    const u = getUser(); if (!u?.email) return;
+    try {
+      const res = await fetch(`${API}/favorites/${u.email}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSavedListings(data);
+        setFavoriteIds(new Set(data.map(l => l.id)));
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const toggleFavorite = async (e, listingId) => {
+    e.preventDefault(); e.stopPropagation();
+    const u = getUser(); if (!u?.email) return;
+    const isFav = favoriteIds.has(listingId);
+    try {
+      if (isFav) {
+        await fetch(`${API}/favorites/${u.email}/${listingId}`, { method: "DELETE" });
+        setFavoriteIds(prev => { const s = new Set(prev); s.delete(listingId); return s; });
+        setSavedListings(prev => prev.filter(l => l.id !== listingId));
+      } else {
+        await fetch(`${API}/favorites/${u.email}/${listingId}`, { method: "POST" });
+        setFavoriteIds(prev => new Set(prev).add(listingId));
+        // Add listing to saved from feed if available
+        const lst = feed.find(l => l.id === listingId);
+        if (lst) setSavedListings(prev => [lst, ...prev]);
+      }
+    } catch (e) { console.error(e); }
+  };
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,6 +110,7 @@ export default function GuestDashboard() {
   useEffect(() => {
     fetchTrips();
     fetchFeed();
+    fetchFavorites();
   }, []);
 
   // Debounced search on searchQuery change
@@ -265,8 +302,59 @@ export default function GuestDashboard() {
           </section>
         )}
 
+        {/* Tab Switcher */}
+        <div style={{ display: "flex", gap: "8px", marginBottom: "28px" }}>
+          {[{key:"explore",label:"Explore"},{key:"saved",label:`Saved (${savedListings.length})`}].map(t => (
+            <button key={t.key} onClick={() => setActiveTab(t.key)}
+              style={{ padding: "10px 24px", borderRadius: "999px", border: activeTab === t.key ? "none" : "1.5px solid #e2e8f0", background: activeTab === t.key ? "linear-gradient(135deg, #0ea5e9, #0284c7)" : "#fff", color: activeTab === t.key ? "#fff" : "#64748b", fontWeight: 700, fontSize: "14px", cursor: "pointer", transition: "all 0.2s", boxShadow: activeTab === t.key ? "0 4px 12px rgba(14,165,233,0.25)" : "none" }}>
+              {t.key === "saved" && <Heart size={14} style={{ marginRight: "6px", verticalAlign: "-2px" }} fill={activeTab === t.key ? "#fff" : "#ef4444"} color={activeTab === t.key ? "#fff" : "#ef4444"} />}
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Saved Tab */}
+        {activeTab === "saved" && (
+          <section style={{ animation: "fadeIn 0.4s ease both" }}>
+            {savedListings.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "72px 24px", background: "rgba(255,255,255,0.8)", borderRadius: "24px", border: "2px dashed #e2e8f0" }}>
+                <div style={{ fontSize: "48px", marginBottom: "16px" }}>❤️</div>
+                <p style={{ fontWeight: 700, color: "#0f172a", marginBottom: "6px", fontSize: "1.1rem" }}>No saved listings yet</p>
+                <p style={{ fontSize: "14px", color: "#64748b" }}>Tap the heart icon on any listing to save it here.</p>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(270px, 1fr))", gap: "24px" }}>
+                {savedListings.map((lst, idx) => (
+                  <Link to={`/listing/${lst.id}`} key={lst.id}
+                    style={{ display: "block", background: "rgba(255,255,255,0.95)", borderRadius: "20px", overflow: "hidden", textDecoration: "none", color: "inherit", transition: "transform 0.25s, box-shadow 0.25s", boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: "1px solid rgba(226,232,240,0.8)" }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-6px)"; e.currentTarget.style.boxShadow = "0 20px 40px rgba(0,0,0,0.12)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.05)"; }}>
+                    <div style={{ height: "210px", position: "relative", overflow: "hidden" }}>
+                      {lst.imageUrls
+                        ? <img src={lst.imageUrls.split(",")[0].trim()} alt={lst.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #dbeafe, #bfdbfe)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "48px" }}>🏡</div>}
+                      <button onClick={(e) => toggleFavorite(e, lst.id)} style={{ position: "absolute", top: "12px", right: "12px", background: "rgba(255,255,255,0.9)", border: "none", borderRadius: "50%", width: "36px", height: "36px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", transition: "transform 0.2s" }}
+                        onMouseEnter={e => e.currentTarget.style.transform = "scale(1.15)"} onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                        <Heart size={18} fill="#ef4444" color="#ef4444" />
+                      </button>
+                    </div>
+                    <div style={{ padding: "16px 18px 18px" }}>
+                      <div style={{ fontWeight: 700, fontSize: "15px", color: "#0f172a", marginBottom: "4px" }}>{lst.title}</div>
+                      <div style={{ fontSize: "13px", color: "#64748b", display: "flex", alignItems: "center", gap: "4px", marginBottom: "12px" }}><MapPin size={12} color="#94a3b8" />{lst.city}</div>
+                      <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div><span style={{ fontWeight: 800, fontSize: "17px", color: "#0f172a" }}>₱{lst.pricePerNight?.toLocaleString()}</span><span style={{ fontSize: "12px", color: "#94a3b8" }}> / night</span></div>
+                        <span style={{ fontSize: "12px", color: "#0ea5e9", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>View <ArrowRight size={13} /></span>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* Listings Feed */}
-        <section>
+        {activeTab === "explore" && <section>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
             <h2 style={{ fontSize: "1.4rem", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.5px" }}>
               {searchQuery ? `Results for "${searchQuery}"` : (city || type ? "Filtered Stays" : "Available Rentals")}
@@ -317,13 +405,19 @@ export default function GuestDashboard() {
                         {lst.type}
                       </span>
                     )}
+                    <button onClick={(e) => toggleFavorite(e, lst.id)} style={{ position: "absolute", top: "12px", right: "12px", background: "rgba(255,255,255,0.9)", border: "none", borderRadius: "50%", width: "36px", height: "36px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", transition: "transform 0.2s" }}
+                      onMouseEnter={e => e.currentTarget.style.transform = "scale(1.15)"} onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+                      <Heart size={18} fill={favoriteIds.has(lst.id) ? "#ef4444" : "none"} color={favoriteIds.has(lst.id) ? "#ef4444" : "#64748b"} />
+                    </button>
                   </div>
                   <div style={{ padding: "16px 18px 18px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" }}>
                       <div style={{ fontWeight: 700, fontSize: "15px", color: "#0f172a", flex: 1, marginRight: "8px", lineHeight: 1.3 }}>{lst.title}</div>
                       <div style={{ display: "flex", alignItems: "center", gap: "3px", flexShrink: 0 }}>
-                        <Star size={13} fill="#fbbf24" color="#fbbf24" />
-                        <span style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>4.9</span>
+                        <Star size={13} fill={lst.averageRating ? "#fbbf24" : "#cbd5e1"} color={lst.averageRating ? "#fbbf24" : "#cbd5e1"} />
+                        <span style={{ fontSize: "13px", fontWeight: 700, color: lst.averageRating ? "#0f172a" : "#64748b" }}>
+                          {lst.averageRating ? lst.averageRating.toFixed(1) : "New"}
+                        </span>
                       </div>
                     </div>
                     <div style={{ fontSize: "13px", color: "#64748b", display: "flex", alignItems: "center", gap: "4px", marginBottom: "4px" }}>
@@ -346,7 +440,7 @@ export default function GuestDashboard() {
               ))}
             </div>
           )}
-        </section>
+        </section>}
       </div>
     </div>
   );

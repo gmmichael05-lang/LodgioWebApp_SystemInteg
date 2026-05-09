@@ -43,6 +43,15 @@ public class Listing {
 
     private String status = "ACTIVE";
 
+    @Column(name = "is_active")
+    private Boolean isActive = true;
+
+    @Column(name = "average_rating")
+    private Double averageRating = 0.0;
+
+    @Column(name = "review_count")
+    private Integer reviewCount = 0;
+
     private String type;
     private Integer beds;
     private Integer baths;
